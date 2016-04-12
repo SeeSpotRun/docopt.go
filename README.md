@@ -38,6 +38,21 @@ Options:
 
 	  arguments, _ := docopt.Parse(usage, nil, true, "Naval Fate 2.0", false)
 	  fmt.Println(arguments)
+
+	  // optional casting to one or more structs:
+	  type moveOptions struct {
+		  L_speed    int
+		  A_x        float32
+		  A_y        float32
+		  A_name     string
+	  }
+	  var opts moveOptions
+	  err := docopt.Cast(&opts, arguments)
+	  if err != nil {
+		  fmt.Println(err)
+	  } else {
+		  fmt.Println(opts)
+	  }
 }
 ```
 
