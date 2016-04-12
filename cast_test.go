@@ -2,6 +2,7 @@ package docopt
 
 import (
 	"testing"
+	"reflect"
 )
 
 func TestRead(t *testing.T) {
@@ -24,51 +25,55 @@ func TestRead(t *testing.T) {
 	)
 
         usage := `Usage:
-  cast_test [options]
+  cast_test [options] <values>...
 
 Options:
   --intval=N       Sets intval
   --uintval=N      Sets uintval
   --byteval=N      Sets byteval, optionally add suffix K/M/G/T for kilobytes etc
   --realval=X      Sets realval
-  --boolval        Sets boolval to true
+  -b               Sets boolval to true
   --strval=string  Sets strval to string
 
 `
 
-	type Options struct{
-		Xintval  int
-		Xuintval uint64
-		Xboolval bool
-		Xbyteval uint32
-		Xrealval float32
-		Xstrval  string
+	type options struct{
+		L_intval  int
+		L_uintval uint64
+		S_b       bool
+		L_byteval uint32
+		L_realval float32
+		L_strval  string
+		A_values  []int
 	}
 
-	argv := []string{"--intval", intstr, "--uintval", uintstr, "--byteval", bytestr, "--realval", realstr, "--boolval", "--strval", strval}
+	argv := []string{"--intval", intstr, "--uintval", uintstr, "--byteval", bytestr, "--realval", realstr, "-b", "--strval", strval, "1", "1k" }
 	arguments, _ := Parse(usage, argv, true, "", false)
 
-	var opts Options
+	var opts options
 	err := Cast(&opts, arguments)
 
 	if err != nil {
 		t.Errorf("Cast: %v", err)
 	}
 	
-	if opts.Xintval != intval {
-		t.Errorf("intval: expected %v got %v", intval, opts.Xintval)
+	if opts.L_intval != intval {
+		t.Errorf("intval: expected %v got %v", intval, opts.L_intval)
 	}
-	if opts.Xuintval != uintval {
-		t.Errorf("uintval: expected %v got %v", uintval, opts.Xuintval)
+	if opts.L_uintval != uintval {
+		t.Errorf("uintval: expected %v got %v", uintval, opts.L_uintval)
 	}
-	if opts.Xbyteval != byteval {
-		t.Errorf("byteval: expected %v got %v", byteval, opts.Xbyteval)
+	if opts.L_byteval != byteval {
+		t.Errorf("byteval: expected %v got %v", byteval, opts.L_byteval)
 	}
-	if opts.Xboolval != true {
-		t.Errorf("boolval: expected %v got %v", true, opts.Xboolval)
+	if opts.S_b != true {
+		t.Errorf("boolval: expected %v got %v", true, opts.S_b)
 	}
-	if opts.Xstrval != strval {
-		t.Errorf("strval: expected %v got %v", strval, opts.Xstrval)
+	if opts.L_strval != strval {
+		t.Errorf("strval: expected %v got %v", strval, opts.L_strval)
+	}
+	if !reflect.DeepEqual(opts.A_values, []int {1, 1024}) {
+		t.Errorf("values: expected %v got %v", []int {1, 1024}, opts.A_values)
 	}
 
 }

@@ -11,14 +11,14 @@ import (
 )
 
 // Cast attempts to unmarshall the values in optMap into the fields
-// in the structure pointed to by optStruct.  The first letter in
-// each field must be a capital letter (to make it exportable) but is
-// ignored.
+// in the structure pointed to by optStruct.  The field name must start
+// with 'A_' for an argument, 'L_' for a long (--) flag and 'S_' for a
+// short (-) flag.
 // Example:
 //  	type Options struct{
-//		Xintval  int
-//		Xboolval bool
-//		Xstrval  string
+//		L_intval  int
+//		L_boolval bool
+//		L_strval  string
 //	}
 //	var opts Options
 //	args, _ := docopt.Parse(os.Args[1:])
@@ -33,6 +33,8 @@ import (
 // to 10240.
 func Cast(optStruct interface{}, optMap map[string]interface{}) error {
 
+	errstr := ""
+
 	ps := reflect.ValueOf(optStruct)
 	vs := reflect.Indirect(ps)
 	ts := vs.Type()
@@ -45,76 +47,127 @@ func Cast(optStruct interface{}, optMap map[string]interface{}) error {
 
 		f := ts.Field(i)
 		v := vs.Field(i)
-		fmt.Println("f, v:", f, v)
 		if !v.CanSet() {
-			return errors.New("Cast: can't set field " + f.Name)
+			errstr += "docopt.Cast: can't set field " + f.Name + "\n"
+			continue
 		}
 
-		opt := "--" + f.Name[1:]
+		var prefix, suffix string
+		switch f.Name[:2] {
+		case "A_":
+			prefix = "<"
+			suffix = ">"
+		case "S_":
+			prefix = "-"
+		case "L_":
+			prefix = "--"
+		}
+		if prefix == "" || len(f.Name) < 3 {
+			errstr += "docopt.Cast: field'" + f.Name + "' not of format A_*, S_* or L_*\n"
+			continue
+		}
+
+		opt := prefix + f.Name[2:] + suffix
 		o, ok := optMap[opt]
 		if !ok {
-			return errors.New("docopt.Cast: '" + opt + "' not found in optMap")
+			errstr += "docopt.Cast: '" + opt + "' not found in optMap\n"
+			continue
 		}
 
 		if o == nil {
 			continue
 		}
 
-		vopt := reflect.ValueOf(o)
 		topt := reflect.TypeOf(o)
+		vopt := reflect.ValueOf(o)
 
 		// try for direct assign:
-		fmt.Println("o, vopt, topt:", o, vopt, topt)
 		if topt.AssignableTo(f.Type) {
-			v.Set(vopt)
+			v.Set(reflect.ValueOf(o))
 			continue
 		}
 
-		// manual unmarshalling:
-		switch topt.Kind() {
-		case reflect.String:
+		// unmarshal tries to set value of 'to' based on content of 'from'
+		unmarshall := func(from reflect.Value, to reflect.Value) {
 
-			s, _ := o.(string)
-
-			switch f.Type.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				ival, err := strconv.ParseInt(s, 10, f.Type.Bits())
-				if err != nil {
-					// try again looking for B/K/M/G/T
-					fval, e := getBytes(s, err)
-					if e != nil {
-						return e
-					}
-					ival = int64(fval)
-				}
-				vs.Field(i).SetInt(ival)
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				uval, err := strconv.ParseUint(s, 10, f.Type.Bits())
-				if err != nil {
-					// try again looking for B/K/M/G/T
-					fval, e := getBytes(s, err)
-					if e != nil {
-						return e
-					}
-					uval = uint64(fval)
-				}
-				vs.Field(i).SetUint(uval)
-			case reflect.Float32, reflect.Float64:
-				fval, err := strconv.ParseFloat(s, f.Type.Bits())
-				if err != nil {
-					return err
-				}
-				vs.Field(i).SetFloat(fval)
-			default:
-				return errors.New(fmt.Sprintf("Unhandled kind: %v", f.Type.Kind()))
+			// try for direct assign:
+			if from.Type().AssignableTo(to.Type()) {
+				to.Set(from)
+				return
 			}
-		default:
-			return errors.New(fmt.Sprintf("Don't know how to unmarshall %v to %v",
-				topt.Kind(),
-				f.Type.Kind()))
-		}
-	}
 
+			// do it the hard way:
+			switch from.Kind() {
+
+			case reflect.String:
+
+				s := from.String()
+				fmt.Println("s:", s)
+
+				switch to.Kind() {
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					ival, err := strconv.ParseInt(s, 10, to.Type().Bits())
+					if err != nil {
+						// try again looking for B/K/M/G/T
+						ival, err = getBytes(s, err)
+						if err != nil {
+							errstr += err.Error() + "\n"
+							return
+						}
+					}
+					to.SetInt(ival)
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					uval, err := strconv.ParseUint(s, 10, to.Type().Bits())
+					if err != nil {
+						// try again looking for B/K/M/G/T
+						ival, e := getBytes(s, err)
+						if e != nil {
+							errstr += e.Error() + "\n"
+							return
+						}
+						uval = uint64(ival)
+					}
+					to.SetUint(uval)
+				case reflect.Float32, reflect.Float64:
+					fval, err := strconv.ParseFloat(s, to.Type().Bits())
+					if err != nil {
+						errstr += err.Error() + "\n"
+						return
+					}
+					to.SetFloat(fval)
+				default:
+					errstr += fmt.Sprintf("Unhandled destination kind: %v\n", to.Kind())
+					return
+				}
+			default:
+				errstr += fmt.Sprintf("Don't know how to unmarshall %v to %v\n",
+					from.Kind(),
+					to.Kind())
+				return
+			}
+		}
+
+		if topt.Kind() != reflect.Slice {
+			unmarshall(vopt, vs.Field(i))
+			continue
+		}
+
+		// handle slices:
+		if vs.Field(i).Kind() == reflect.Slice {
+			// do a deep unmarshall
+			vs.Field(i).Set(reflect.MakeSlice(vs.Field(i).Type(), vopt.Len(), vopt.Len()))
+			for j := 0; j < vopt.Len(); j++ {
+				unmarshall(vopt.Index(j), vs.Field(i).Index(j))
+			}
+		} else if vopt.Len() == 1 {
+			// maps length==1 slice to single field
+			unmarshall(vopt.Index(0), vs.Field(i))
+		}
+
+	}
+	if len(errstr) > 0 {
+		return errors.New(errstr[:len(errstr)-1]) // strips trailling newline
+	}
 	return nil
 }
 
